@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "mongoose": "^9.7.1",
@@ -9,7 +10,6 @@
   "name": "websocket",
   "version": "1.0.0",
   "main": "index.js",
-  "devDependencies": {},
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js"
