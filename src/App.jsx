@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Outlet, useNavigate, useMatch } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -7,11 +7,12 @@ import {
   BadgeCheck, UserRound, UsersRound, Radio, Phone, Settings, Contact, UserPlus,
 } from 'lucide-react'
 import { logout } from './store/slices/authSlice'
-import { setContacts, addContact, setOnlineUsers, appendMessage, clearChat } from './store/slices/chatSlice'
+import { setContacts, addContact, setOnlineUsers, appendMessage, clearChat, incrementUnread, resetUnread, markRead } from './store/slices/chatSlice'
 import { setNotifications, addNotification, markAllRead, clearNotifications } from './store/slices/notificationSlice'
 import { BackgroundOrbs, IconBtn } from './theme/components.jsx'
-import { colors, gradients, shadows, variants } from './theme/index.js'
+import { colors, gradients, shadows } from './theme/index.js'
 import socket from './socket'
+import { playNotificationSound } from './utils/sound'
 
 function convKey(a, b) {
   return [a, b].sort().join('_')
@@ -55,22 +56,15 @@ function Avatar({ contact, size = 44, isOnline }) {
   )
 }
 
-function ContactItem({ contact, isActive, isOnline, onClick, index }) {
+function ContactItem({ contact, isActive, isOnline, unreadCount, onClick }) {
   return (
-    <motion.button
-      custom={index}
-      variants={variants.fadeUp}
-      initial="initial"
-      animate="animate"
+    <button
       onClick={() => onClick(contact._id)}
-      whileHover={{ background: 'rgba(255,255,255,0.07)', x: 2 }}
-      whileTap={{ scale: 0.98 }}
       style={{
         width: '100%', display: 'flex', alignItems: 'center', gap: 12,
         padding: '10px 16px', border: 'none', cursor: 'pointer', textAlign: 'left',
         background: isActive ? 'rgba(124,58,237,0.18)' : 'transparent',
         borderLeft: isActive ? '3px solid #7c3aed' : '3px solid transparent',
-        transition: 'background 0.15s',
       }}
     >
       <Avatar contact={contact} isOnline={isOnline} />
@@ -85,19 +79,23 @@ function ContactItem({ contact, isActive, isOnline, onClick, index }) {
           {isOnline ? '● Online' : '○ Offline'}
         </p>
       </div>
-    </motion.button>
+      {unreadCount > 0 && (
+        <span style={{
+          minWidth: 20, height: 20, borderRadius: 10, padding: '0 6px',
+          background: '#7c3aed', color: 'white', fontSize: 11, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </span>
+      )}
+    </button>
   )
 }
 
-function SearchResultItem({ result, onAdd, onOpenChat, index }) {
+function SearchResultItem({ result, onAdd, onOpenChat }) {
   return (
-    <motion.div
-      custom={index}
-      variants={variants.fadeUp}
-      initial="initial"
-      animate="animate"
+    <div
       onClick={() => onOpenChat(result)}
-      whileHover={{ background: 'rgba(255,255,255,0.07)' }}
       style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', cursor: 'pointer' }}
     >
       <Avatar contact={result} />
@@ -115,8 +113,7 @@ function SearchResultItem({ result, onAdd, onOpenChat, index }) {
           {result.email}
         </p>
       </div>
-      <motion.button
-        whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.94 }}
+      <button
         onClick={(e) => { e.stopPropagation(); onAdd(result._id) }}
         title="Do'stlikka qo'shish"
         style={{
@@ -127,22 +124,20 @@ function SearchResultItem({ result, onAdd, onOpenChat, index }) {
         }}
       >
         <UserPlus size={16} />
-      </motion.button>
-    </motion.div>
+      </button>
+    </div>
   )
 }
 
-function EmptyState() {
+export function EmptyState() {
   return (
-    <motion.div
-      variants={variants.page} initial="initial" animate="animate"
+    <div
       style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         justifyContent: 'center', height: '100%', gap: 16,
       }}
     >
-      <motion.div
-        variants={variants.scaleIn}
+      <div
         style={{
           width: 72, height: 72, borderRadius: 22,
           background: gradients.primarySoft,
@@ -151,7 +146,7 @@ function EmptyState() {
         }}
       >
         <MessageSquare size={32} color={colors.primaryLight} strokeWidth={1.5} />
-      </motion.div>
+      </div>
       <div style={{ textAlign: 'center' }}>
         <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: colors.text.secondary }}>
           Kontakt tanlang
@@ -160,7 +155,7 @@ function EmptyState() {
           Chap paneldan kontakt tanlang
         </p>
       </div>
-    </motion.div>
+    </div>
   )
 }
 
@@ -308,13 +303,19 @@ export default function App() {
   const navigate = useNavigate()
   const match = useMatch('/chat/:userId')
   const activeId = match?.params?.userId
+  const groupMatch = useMatch('/group/:groupId')
+  const activeGroupId = groupMatch?.params?.groupId
   const dispatch = useDispatch()
   const { user } = useSelector(s => s.auth)
   const contacts = useSelector(s => s.chat.contacts)
   const contactsLoading = useSelector(s => s.chat.contactsLoading)
   const onlineUsers = useSelector(s => s.chat.onlineUsers)
+  const unreadCounts = useSelector(s => s.chat.unreadCounts)
   const notifications = useSelector(s => s.notification.items)
   const unreadCount = useSelector(s => s.notification.unreadCount)
+
+  const activeIdRef = useRef(activeId)
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
 
   useEffect(() => {
     if (!user) return
@@ -336,6 +337,18 @@ export default function App() {
 
     socket.on('chat:receive', msg => {
       dispatch(appendMessage({ key: convKey(msg.from, msg.to), message: msg }))
+      playNotificationSound()
+      if (activeIdRef.current === msg.from) {
+        socket.emit('chat:read', { userId: msg.to, fromUserId: msg.from }, res => {
+          if (res?.success) dispatch(resetUnread(msg.from))
+        })
+      } else {
+        dispatch(incrementUnread(msg.from))
+      }
+    })
+
+    socket.on('chat:read', ({ by }) => {
+      dispatch(markRead({ key: convKey(user._id, by), readerId: by }))
     })
 
     socket.on('contacts:added', contact => dispatch(addContact(contact)))
@@ -345,6 +358,7 @@ export default function App() {
       socket.off('connect', init)
       socket.off('users:online')
       socket.off('chat:receive')
+      socket.off('chat:read')
       socket.off('contacts:added')
       socket.off('notification:new')
     }
@@ -528,6 +542,7 @@ export default function App() {
                     index={i}
                     isActive={c._id === activeId}
                     isOnline={onlineUsers.includes(c._id)}
+                    unreadCount={unreadCounts[c._id] || 0}
                     onClick={id => navigate('/chat/' + id)}
                   />
                 ))}
@@ -549,13 +564,7 @@ export default function App() {
       </motion.aside>
 
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative', zIndex: 10 }}>
-        <AnimatePresence mode="wait">
-          {activeId ? (
-            <Outlet key={activeId} />
-          ) : (
-            <EmptyState key="empty-state" />
-          )}
-        </AnimatePresence>
+        <Outlet />
       </main>
 
       <ProfileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={user} />

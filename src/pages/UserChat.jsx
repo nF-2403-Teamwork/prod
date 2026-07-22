@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Smile } from 'lucide-react'
-import { setHistory, appendMessage } from '../store/slices/chatSlice'
-import { colors, gradients, shadows, variants } from '../theme/index.js'
+import { Send, Smile, Check, CheckCheck } from 'lucide-react'
+import { setHistory, appendMessage, resetUnread } from '../store/slices/chatSlice'
+import { colors, gradients, shadows } from '../theme/index.js'
 import socket from '../socket'
 
 const EMOJIS = [
@@ -50,7 +49,7 @@ export default function UserChat() {
 
   const [text, setText] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
-  const bottomRef = useRef(null)
+  const messagesRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -61,11 +60,15 @@ export default function UserChat() {
 
     socket.emit('chat:history', { from: user._id, to: userId }, res => {
       if (res.success) dispatch(setHistory({ key: convKey(user._id, userId), messages: res.messages }))
+      socket.emit('chat:read', { userId: user._id, fromUserId: userId }, readRes => {
+        if (readRes?.success) dispatch(resetUnread(userId))
+      })
     })
   }, [userId, user?._id])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  useLayoutEffect(() => {
+    const el = messagesRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [messages])
 
   const handleSend = () => {
@@ -126,25 +129,20 @@ export default function UserChat() {
       </div>
 
       {/* ── Messages ── */}
-      <div style={{
+      <div ref={messagesRef} style={{
         flex: 1, overflowY: 'auto', padding: '16px 20px',
         display: 'flex', flexDirection: 'column', gap: 6,
       }}>
         {messages.length === 0 ? (
-          <motion.p
-            variants={variants.page} initial="initial" animate="animate"
-            style={{ textAlign: 'center', fontSize: 13, color: colors.text.muted, marginTop: 40 }}
-          >
+          <p style={{ textAlign: 'center', fontSize: 13, color: colors.text.muted, marginTop: 40 }}>
             Hali xabar yo'q. Salomlashing! 👋
-          </motion.p>
+          </p>
         ) : (
-          messages.map((msg, i) => {
+          messages.map((msg) => {
             const fromMe = msg.from === user?._id
             return (
-              <motion.div
+              <div
                 key={msg._id}
-                custom={i} variants={variants.fadeUp}
-                initial="initial" animate="animate"
                 style={{
                   display: 'flex',
                   flexDirection: fromMe ? 'row-reverse' : 'row',
@@ -167,42 +165,39 @@ export default function UserChat() {
                   }}>
                     {msg.text}
                   </div>
-                  <span style={{ fontSize: 11, color: colors.text.muted, paddingInline: 4 }}>
+                  <span style={{ fontSize: 11, color: colors.text.muted, paddingInline: 4, display: "flex", alignItems: "center", gap: 3 }}>
                     {formatTime(msg.createdAt)}
+                    {fromMe && (msg.read
+                      ? <CheckCheck size={13} color="#34d399" />
+                      : <Check size={13} color={colors.text.muted} />)}
                   </span>
                 </div>
-              </motion.div>
+              </div>
             )
           })
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* ── Emoji picker ── */}
-      <AnimatePresence>
-        {showEmoji && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
-            style={{
-              overflow: 'hidden', borderTop: `1px solid ${colors.glass.border}`,
-              background: 'rgba(255,255,255,0.04)', padding: '10px 16px',
-            }}
-          >
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {EMOJIS.map(emoji => (
-                <motion.button key={emoji}
-                  whileHover={{ scale: 1.3 }} whileTap={{ scale: 0.9 }}
-                  onClick={() => { setText(p => p + emoji); inputRef.current?.focus() }}
-                  style={{ fontSize: 22, background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}
-                >
-                  {emoji}
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {showEmoji && (
+        <div
+          style={{
+            overflow: 'hidden', borderTop: `1px solid ${colors.glass.border}`,
+            background: 'rgba(255,255,255,0.04)', padding: '10px 16px',
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {EMOJIS.map(emoji => (
+              <button key={emoji}
+                onClick={() => { setText(p => p + emoji); inputRef.current?.focus() }}
+                style={{ fontSize: 22, background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Input bar ── */}
       <div style={{
@@ -212,8 +207,7 @@ export default function UserChat() {
         backdropFilter: 'blur(12px)',
         display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
       }}>
-        <motion.button
-          whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+        <button
           onClick={() => setShowEmoji(p => !p)}
           style={{
             width: 38, height: 38, borderRadius: 12, flexShrink: 0,
@@ -223,7 +217,7 @@ export default function UserChat() {
             cursor: 'pointer', color: colors.text.secondary,
           }}>
           <Smile size={18} />
-        </motion.button>
+        </button>
 
         <input
           ref={inputRef}
@@ -248,11 +242,9 @@ export default function UserChat() {
           }}
         />
 
-        <motion.button
+        <button
           onClick={handleSend}
           disabled={!text.trim()}
-          whileHover={text.trim() ? { scale: 1.08 } : {}}
-          whileTap={text.trim() ? { scale: 0.93 } : {}}
           style={{
             width: 42, height: 42, borderRadius: 13, flexShrink: 0,
             background: text.trim() ? gradients.primary : 'rgba(255,255,255,0.07)',
@@ -262,7 +254,7 @@ export default function UserChat() {
             color: 'white', boxShadow: text.trim() ? shadows.btn : 'none',
           }}>
           <Send size={18} />
-        </motion.button>
+        </button>
       </div>
     </div>
   )
