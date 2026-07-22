@@ -32,6 +32,8 @@ function timeAgo(dateStr) {
   return Math.floor(hr / 24) + ' kun oldin'
 }
 
+const NOTIF_TEXT = { friend_add: "sizni do'st sifatida qo'shdi" }
+
 function Avatar({ contact, size = 44, isOnline }) {
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -76,7 +78,7 @@ function ContactItem({ contact, isActive, isOnline, unreadCount, onClick }) {
           {contact.firstName} {contact.lastName}
         </p>
         <p style={{ margin: '2px 0 0', fontSize: 12, color: isOnline ? '#34d399' : colors.text.muted }}>
-          {isOnline ? '● Online' : '○ Offline'}
+          {isOnline ? 'Online' : 'Offline'}
         </p>
       </div>
       {unreadCount > 0 && (
@@ -243,7 +245,8 @@ function ProfileDrawer({ open, onClose, user }) {
   )
 }
 
-function NotificationPanel({ open, items }) {
+function NotificationPanel({ open, items, onClose }) {
+  const unread = items.filter(n => !n.read).length
   return (
     <AnimatePresence>
       {open && (
@@ -253,7 +256,7 @@ function NotificationPanel({ open, items }) {
           exit={{ opacity: 0, y: -8, scale: 0.97 }}
           transition={{ duration: 0.18 }}
           style={{
-            position: 'absolute', top: 46, right: 0, zIndex: 30,
+            position: 'fixed', top: 64, left: 176, zIndex: 80,
             width: 300, maxHeight: 360, overflowY: 'auto',
             background: 'rgba(20,16,40,0.98)',
             border: `1px solid ${colors.glass.border}`,
@@ -261,10 +264,23 @@ function NotificationPanel({ open, items }) {
           }}
         >
           <div style={{
-            padding: '12px 16px', borderBottom: `1px solid ${colors.glass.border}`,
-            fontSize: 13, fontWeight: 700, color: colors.text.primary,
+            padding: '10px 12px 10px 16px', borderBottom: `1px solid ${colors.glass.border}`,
+            display: 'flex', alignItems: 'center', gap: 8,
           }}>
-            Bildirishnomalar
+            <span style={{ fontSize: 13, fontWeight: 700, color: colors.text.primary }}>
+              Bildirishnomalar
+            </span>
+            {unread > 0 && (
+              <span style={{
+                minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                background: '#7c3aed', color: 'white', fontSize: 10, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {unread}
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
+            <IconBtn icon={X} onClick={onClose} title="Yopish" size={14} />
           </div>
           {items.length === 0 ? (
             <p style={{ margin: 0, padding: '24px 16px', textAlign: 'center', fontSize: 13, color: colors.text.muted }}>
@@ -274,18 +290,24 @@ function NotificationPanel({ open, items }) {
             items.map(n => (
               <div key={n._id} style={{
                 padding: '10px 16px', display: 'flex', gap: 10, alignItems: 'flex-start',
-                background: n.read ? 'transparent' : 'rgba(124,58,237,0.10)',
+                background: n.read ? 'transparent' : 'rgba(124,58,237,0.22)',
                 borderBottom: `1px solid ${colors.glass.border}`,
               }}>
                 {n.from && <Avatar contact={n.from} size={32} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: 13, color: colors.text.primary }}>
-                    <b>{n.from && n.from.firstName} {n.from && n.from.lastName}</b> sizni do'st sifatida qo'shdi
+                    <b>{n.from && n.from.firstName} {n.from && n.from.lastName}</b> {NOTIF_TEXT[n.type] || 'yangi bildirishnoma yubordi'}
                   </p>
                   <p style={{ margin: '3px 0 0', fontSize: 11, color: colors.text.muted }}>
                     {timeAgo(n.createdAt)}
                   </p>
                 </div>
+                {!n.read && (
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: colors.primaryLight, marginTop: 5,
+                  }} />
+                )}
               </div>
             ))
           )}
@@ -303,8 +325,6 @@ export default function App() {
   const navigate = useNavigate()
   const match = useMatch('/chat/:userId')
   const activeId = match?.params?.userId
-  const groupMatch = useMatch('/group/:groupId')
-  const activeGroupId = groupMatch?.params?.groupId
   const dispatch = useDispatch()
   const { user } = useSelector(s => s.auth)
   const contacts = useSelector(s => s.chat.contacts)
@@ -318,7 +338,8 @@ export default function App() {
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
 
   useEffect(() => {
-    if (!user) return
+    // eski persisted sessiyada user._id bo'lmasligi mumkin — null user:online yubormaymiz
+    if (!user?._id) return
 
     const init = () => {
       socket.emit('user:online', user._id)
@@ -330,8 +351,9 @@ export default function App() {
       })
     }
 
-    init()
+    // ulanish tugamasidan emit qilsak paketlar bufferga tushib, connect'da ikki marta ketadi
     socket.on('connect', init)
+    if (socket.connected) init()
 
     socket.on('users:online', ids => dispatch(setOnlineUsers(ids)))
 
@@ -479,7 +501,6 @@ export default function App() {
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
-                <NotificationPanel open={notifOpen} items={notifications} />
               </div>
               <IconBtn icon={LogOut} onClick={handleLogout} title="Chiqish" />
             </div>
@@ -567,6 +588,7 @@ export default function App() {
         <Outlet />
       </main>
 
+      <NotificationPanel open={notifOpen} items={notifications} onClose={() => setNotifOpen(false)} />
       <ProfileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={user} />
     </div>
   )
