@@ -6,8 +6,204 @@
   color-scheme: light dark;
 }
 
+/* ============================================================================
+   Theme tokens. The dark theme is the original "purple glass"; the light theme
+   is a Stitch-style "cream glass". Set on <html data-theme> (ThemeApplier) and
+   on the chat root, so the variables cascade to every custom surface.
+   ========================================================================== */
+[data-theme="dark"] {
+  --app-bg:
+    radial-gradient(680px circle at 60% 2%, rgba(139, 92, 246, 0.26), transparent 50%),
+    radial-gradient(900px circle at 10% 14%, rgba(124, 92, 245, 0.3), transparent 55%),
+    radial-gradient(820px circle at 92% 28%, rgba(70, 150, 240, 0.18), transparent 55%),
+    radial-gradient(760px circle at 64% 104%, rgba(180, 120, 245, 0.2), transparent 55%),
+    #0d0c14;
+  --panel-bg:
+    radial-gradient(680px circle at 30% -4%, rgba(139, 92, 246, 0.2), transparent 55%),
+    radial-gradient(760px circle at 100% 8%, rgba(70, 150, 240, 0.14), transparent 55%),
+    #100e18;
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-3: rgba(255, 255, 255, 0.06);
+  --surface-hover: rgba(255, 255, 255, 0.09);
+  --field: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --ring: rgba(255, 255, 255, 0.1);
+  --rail-bg: rgba(255, 255, 255, 0.04);
+  --flyout-bg: rgba(22, 20, 32, 0.72);
+  --recv-bubble: rgba(255, 255, 255, 0.06);
+  --text-strong: #f4f2fb;
+  --text: #e4e1ee;
+  --text-mid: #c7c4d8;
+  --text-muted: #918fa1;
+  --text-faint: #6f6d80;
+  --accent: #c3b4f5;
+  --inset-hi: rgba(255, 255, 255, 0.08);
+  --dot-ring: #15141d;
+  --switch-off: rgba(255, 255, 255, 0.15);
+  --scroll-thumb: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme="light"] {
+  --app-bg:
+    radial-gradient(680px circle at 60% 2%, rgba(139, 92, 246, 0.14), transparent 50%),
+    radial-gradient(900px circle at 10% 14%, rgba(124, 92, 245, 0.13), transparent 55%),
+    radial-gradient(820px circle at 92% 28%, rgba(70, 150, 240, 0.1), transparent 55%),
+    radial-gradient(760px circle at 64% 104%, rgba(180, 120, 245, 0.12), transparent 55%),
+    #f4efe7;
+  --panel-bg:
+    radial-gradient(680px circle at 30% -4%, rgba(139, 92, 246, 0.13), transparent 55%),
+    radial-gradient(760px circle at 100% 8%, rgba(70, 150, 240, 0.09), transparent 55%),
+    #fbf8f3;
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-2: rgba(255, 255, 255, 0.68);
+  --surface-3: rgba(255, 255, 255, 0.78);
+  --surface-hover: rgba(124, 92, 245, 0.09);
+  --field: rgba(255, 255, 255, 0.7);
+  --border: rgba(40, 26, 78, 0.1);
+  --border-soft: rgba(40, 26, 78, 0.07);
+  --ring: rgba(40, 26, 78, 0.08);
+  --rail-bg: rgba(255, 255, 255, 0.55);
+  --flyout-bg: rgba(250, 247, 242, 0.86);
+  --recv-bubble: rgba(255, 255, 255, 0.92);
+  --text-strong: #211f33;
+  --text: #3a3652;
+  --text-mid: #55506b;
+  --text-muted: #7a768e;
+  --text-faint: #9c98ac;
+  --accent: #7c5cf5;
+  --inset-hi: rgba(255, 255, 255, 0.6);
+  --dot-ring: #f4efe7;
+  --switch-off: rgba(40, 26, 78, 0.22);
+  --scroll-thumb: rgba(40, 26, 78, 0.2);
+}
+
 html,
 body,
 #root {
   height: 100%;
+}
+
+/* ---- Panel / overlay animations (used by the left slide-over panels) ---- */
+@keyframes so-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes so-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes so-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.so-pop {
+  animation: so-pop-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.so-row {
+  animation: so-row-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Simple overlay/backdrop fade-in (modals, popovers, call surface). */
+.fade-in {
+  animation: so-fade-in 0.2s ease both;
+}
+/* Default smooth feel for interactive controls that lack their own recipe. */
+.btn-smooth {
+  transition: all 0.2s ease;
+}
+.btn-smooth:active {
+  transform: scale(0.95);
+}
+
+/* Left settings flyout slide-in. */
+@keyframes flyout-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Smooth route/panel content entrance. */
+.page-in {
+  animation: so-fade-in 0.25s ease both;
+}
+
+/* iMessage-style message bubble entrance — pops up from the bottom. */
+@keyframes msg-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.msg-in {
+  animation: msg-pop 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.msg-in-right {
+  transform-origin: bottom right;
+}
+.msg-in-left {
+  transform-origin: bottom left;
+}
+
+/* Live "recording" equaliser bars in the voice recorder. */
+@keyframes rec-bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Thin, quiet scrollbars inside dark panels. */
+.so-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb, rgba(255, 255, 255, 0.14)) transparent;
+}
+.so-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.so-scroll::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+}
+
+/* Respect the OS "reduce motion" preference — collapse every animation and
+   transition to be effectively instant. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
