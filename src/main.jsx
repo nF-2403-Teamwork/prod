@@ -1,59 +1,60 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import { Provider } from 'react-redux'
-import { PersistGate } from 'redux-persist/integration/react'
-import { store, persistor } from './store'
-import './index.css'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { Provider } from "react-redux";
+import { PersistGate } from "redux-persist/integration/react";
 
-import App, { EmptyState } from './App.jsx'
-import Login from './pages/Login.jsx'
-import Register from './pages/Register.jsx'
-import UserChat from './pages/UserChat.jsx'
-import Profile from './pages/Profile.jsx'
-import GroupChat from './pages/GroupChat.jsx'
-import NotFound from './pages/NotFound.jsx'
-import ErrorBoundary from './pages/ErrorBoundary.jsx'
-import ProtectedRoute from './components/ProtectedRoute.jsx'
+import { store, persistor } from "./store/store";
+import { WebSocketProvider } from "./context/WebSocketContext";
+import { CallProvider } from "./context/CallContext";
+import CallOverlay from "./components/CallOverlay";
+import ThemeApplier from "./components/ThemeApplier";
+import ProtectedRoute from "./routes/ProtectedRoute";
+import ChatLayout from "./layouts/ChatLayout";
+import ChatEmpty from "./pages/ChatEmpty";
+import Conversation from "./pages/Conversation";
+import RoomConversation from "./pages/RoomConversation";
+import Login from "./pages/Login";
+import NotFound from "./pages/NotFound";
+import ErrorBoundary from "./pages/ErrorBoundary";
+import "./index.css";
 
+// React Router v6 data router. The chat lives at "/" behind <ProtectedRoute />;
+// unauthenticated users are bounced to /login (which itself runs over the same
+// websocket connection to request and verify a login code).
 const router = createBrowserRouter([
+  { path: "/login", element: <Login />, errorElement: <ErrorBoundary /> },
   {
-    path: '/',
-    element: (
-      <ProtectedRoute>
-        <App />
-      </ProtectedRoute>
-    ),
+    element: <ProtectedRoute />,
     errorElement: <ErrorBoundary />,
     children: [
-      { index: true, element: <EmptyState /> },
-      { path: 'chat/:userId', element: <UserChat /> },
-      { path: 'profile', element: <Profile /> },
-      { path: 'group/:groupId', element: <GroupChat /> },
+      {
+        path: "/",
+        element: <ChatLayout />,
+        children: [
+          { index: true, element: <ChatEmpty /> },
+          { path: "chat/:contactId", element: <Conversation /> },
+          { path: "room/:roomId", element: <RoomConversation /> },
+        ],
+      },
     ],
   },
-  {
-    path: '/login',
-    element: <Login />,
-    errorElement: <ErrorBoundary />,
-  },
-  {
-    path: '/register',
-    element: <Register />,
-    errorElement: <ErrorBoundary />,
-  },
-  {
-    path: '*',
-    element: <NotFound />,
-  },
-])
+  { path: "*", element: <NotFound /> },
+]);
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
     <Provider store={store}>
       <PersistGate loading={null} persistor={persistor}>
-        <RouterProvider router={router} />
+        <ThemeApplier />
+        <WebSocketProvider>
+          {/* Outside the router so an incoming call surfaces on any screen. */}
+          <CallProvider>
+            <RouterProvider router={router} />
+            <CallOverlay />
+          </CallProvider>
+        </WebSocketProvider>
       </PersistGate>
     </Provider>
-  </StrictMode>,
-)
+  </React.StrictMode>,
+);
