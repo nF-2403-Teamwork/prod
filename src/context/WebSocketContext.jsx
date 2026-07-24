@@ -79,6 +79,27 @@ const decodeEnv = (text) => {
   }
 };
 
+// Attachment kinds that ride the tunnel as `media` envelopes and show as a
+// bubble in the thread (image/voice/video/file); text uses the plain path.
+const MEDIA_KINDS = new Set(["image", "voice", "video", "file"]);
+
+// Gifts and media attachments are the only envelope kinds that appear in the
+// thread; everything else (call signalling, posts, profile) is consumed by the
+// dispatcher. Returns the thread message, or null for non-thread kinds.
+const threadMsgFromEnv = (m, env, fromEmail, toEmail) => {
+  const base = {
+    id: idOf(m),
+    from: fromEmail,
+    to: toEmail,
+    text: "",
+    ts: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
+    read: Boolean(m.read),
+  };
+  if (env.kind === "gift") return { ...base, kind: "gift", gift: env.data };
+  if (env.kind === "media") return { ...base, kind: env.data?.kind, attachment: env.data?.attachment };
+  return null;
+};
+
 // Server messages: { _id, from, to, text, createdAt, read } with from/to as
 // raw ObjectId strings. Resolve them to emails via the known-users map.
 const mapMessage = (m, emailOf) => ({
@@ -381,23 +402,14 @@ export function WebSocketProvider({ children }) {
         const me = myEmailRef.current;
         const other = fromEmail === me ? toEmail : fromEmail;
         if (!other) return false;
+        let msg;
         if (env) {
           handleEnvelopeRef.current(env, { fromEmail, toEmail, live: true });
-          if (env.kind !== "gift") return true; // signalling never hits the thread
+          msg = threadMsgFromEnv(m, env, fromEmail, toEmail);
+          if (!msg) return true; // signalling/posts never hit the thread
+        } else {
+          msg = mapMessage(m, emailOf);
         }
-        const msg =
-          env?.kind === "gift"
-            ? {
-                id: idOf(m),
-                from: fromEmail,
-                to: toEmail,
-                text: "",
-                ts: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
-                read: Boolean(m.read),
-                kind: "gift",
-                gift: env.data,
-              }
-            : mapMessage(m, emailOf);
         setMessages((prev) => {
           const list = prev[other] ?? [];
           if (list.some((x) => x.id === msg.id)) return prev;
@@ -622,48 +634,15 @@ export function WebSocketProvider({ children }) {
           thread.push(mapMessage(m, emailOf));
           continue;
         }
-        // Replaying history restores gifts/stories/posts (deduped in the
-        // slice); call signalling frames are stale and simply dropped.
+        // Replaying history restores gifts/media/posts (deduped in the slice);
+        // call signalling frames are stale and simply dropped.
         const fromEmail = emailOf(m.from);
         const toEmail = emailOf(m.to);
         handleEnvelopeRef.current(env, { fromEmail, toEmail, live: false });
-        if (env.kind === "gift") {
-          thread.push({
-            id: idOf(m),
-            from: fromEmail,
-            to: toEmail,
-            text: "",
-            ts: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
-            read: Boolean(m.read),
-            kind: "gift",
-            gift: env.data,
-          });
-        }
+        const threaded = threadMsgFromEnv(m, env, fromEmail, toEmail);
+        if (threaded) thread.push(threaded);
       }
       setMessages((prev) => ({ ...prev, [withEmail]: thread }));
-    },
-    [ackEmit, idForEmail, emailOf],
-  );
-
-  const sendMessage = useCallback(
-    async (to, text, extra = {}) => {
-      // Attachments (image/voice/video/file) have no backend here.
-      if (extra.kind && extra.kind !== "text") return UNSUPPORTED;
-      const receiverId = idForEmail(to);
-      const from = myIdRef.current;
-      if (!receiverId || !from) return { ok: false, error: "Получатель не найден" };
-      const res = await ackEmit("chat:send", { from, to: receiverId, text });
-      if (res?.success && res.message) {
-        // The sender gets no chat:receive echo — append from the ack.
-        const msg = mapMessage(res.message, emailOf);
-        setMessages((prev) => {
-          const list = prev[to] ?? [];
-          if (list.some((x) => x.id === msg.id)) return prev;
-          return { ...prev, [to]: [...list, msg] };
-        });
-        return { ok: true };
-      }
-      return { ok: false, error: "Не удалось отправить" };
     },
     [ackEmit, idForEmail, emailOf],
   );
@@ -685,6 +664,55 @@ export function WebSocketProvider({ children }) {
       return { ok: false, error: "Не удалось отправить" };
     },
     [ackEmit, idForEmail],
+  );
+
+  const sendMessage = useCallback(
+    async (to, text, extra = {}) => {
+      // Media attachments have no dedicated backend, so (like gifts) they ride
+      // the envelope tunnel: encoded into message text and rebuilt on receipt.
+      if (extra.kind && extra.kind !== "text") {
+        if (!MEDIA_KINDS.has(extra.kind) || !extra.attachment) return UNSUPPORTED;
+        const res = await sendEnvelope(to, "media", {
+          kind: extra.kind,
+          attachment: extra.attachment,
+        });
+        if (!res.ok) return res;
+        if (res.message) {
+          const msg = {
+            id: idOf(res.message),
+            from: myEmailRef.current,
+            to,
+            text: "",
+            ts: res.message.createdAt ? new Date(res.message.createdAt).getTime() : Date.now(),
+            read: false,
+            kind: extra.kind,
+            attachment: extra.attachment,
+          };
+          setMessages((prev) => {
+            const list = prev[to] ?? [];
+            if (list.some((x) => x.id === msg.id)) return prev;
+            return { ...prev, [to]: [...list, msg] };
+          });
+        }
+        return { ok: true };
+      }
+      const receiverId = idForEmail(to);
+      const from = myIdRef.current;
+      if (!receiverId || !from) return { ok: false, error: "Получатель не найден" };
+      const res = await ackEmit("chat:send", { from, to: receiverId, text });
+      if (res?.success && res.message) {
+        // The sender gets no chat:receive echo — append from the ack.
+        const msg = mapMessage(res.message, emailOf);
+        setMessages((prev) => {
+          const list = prev[to] ?? [];
+          if (list.some((x) => x.id === msg.id)) return prev;
+          return { ...prev, [to]: [...list, msg] };
+        });
+        return { ok: true };
+      }
+      return { ok: false, error: "Не удалось отправить" };
+    },
+    [ackEmit, idForEmail, emailOf, sendEnvelope],
   );
 
   const broadcastToContacts = useCallback(
@@ -807,14 +835,44 @@ export function WebSocketProvider({ children }) {
   );
 
   // --- Call signalling over the tunnel (CallContext consumes these) ---
-  const callConfig = useCallback(
-    async () => [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
-    [],
-  );
+  // STUN only discovers public (srflx) addresses; that is enough only when at
+  // least one side has a permissive NAT. Real 1:1 calls between two home/mobile
+  // networks usually need a TURN relay to actually carry media — without it the
+  // PeerConnection gathers candidates and "rings" but never connects. A public
+  // demo relay is the default; override it with VITE_TURN_URL /
+  // VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL (comma-separate multiple URLs).
+  const callConfig = useCallback(async () => {
+    const iceServers = [
+      { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+    ];
+    const turnUrls = (import.meta.env.VITE_TURN_URL || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (turnUrls.length) {
+      iceServers.push({
+        urls: turnUrls,
+        username: import.meta.env.VITE_TURN_USERNAME || "",
+        credential: import.meta.env.VITE_TURN_CREDENTIAL || "",
+      });
+    } else {
+      // Public demo relay (Open Relay by Metered). Rate-limited and not
+      // guaranteed up — fine for testing, replace with your own for production.
+      iceServers.push({
+        urls: [
+          "turn:openrelay.metered.ca:80",
+          "turn:openrelay.metered.ca:443",
+          "turn:openrelay.metered.ca:443?transport=tcp",
+        ],
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      });
+    }
+    return iceServers;
+  }, []);
 
   const callOffer = useCallback(
-    async (peerEmail, sdp, video) => {
-      const callId = nanoid();
+    async (peerEmail, callId, sdp, video) => {
       const res = await sendEnvelope(peerEmail, "call:offer", { callId, video, sdp });
       if (!res.ok) return { ok: false, error: res.error || "Не удалось позвонить" };
       return { ok: true, callId };

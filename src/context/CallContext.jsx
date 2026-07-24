@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useDispatch } from "react-redux";
+import { nanoid } from "@reduxjs/toolkit";
 
 import { useWebSocket } from "./WebSocketContext";
 import { addCall } from "../store/appSlice";
@@ -173,11 +174,15 @@ export function CallProvider({ children }) {
   const startCall = useCallback(
     async (peer, video) => {
       if (callRef.current.phase !== "idle") return;
-      setCall({ ...IDLE, phase: "calling", peer, video, peerVideo: video });
+      // Assign the call id up front so every ICE candidate — including the ones
+      // that trickle out the instant setLocalDescription runs — carries it.
+      // Waiting for the offer ack would send those first (host/LAN) candidates
+      // with a null id, and the callee drops them, killing the direct path.
+      const callId = nanoid();
+      setCall({ ...IDLE, phase: "calling", peer, video, peerVideo: video, callId });
       try {
         const stream = await getMedia(video);
-        let id = null;
-        const pc = await newPeerConnection(peer.email, () => id);
+        const pc = await newPeerConnection(peer.email, () => callId);
 
         // Both m-lines exist up front, so the camera can be switched on later
         // with replaceTrack alone.
@@ -193,14 +198,12 @@ export function CallProvider({ children }) {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        const res = await callOffer(peer.email, offer, video);
+        const res = await callOffer(peer.email, callId, offer, video);
         if (!res?.ok) {
           teardown();
           setCall({ ...IDLE, error: res?.error || "Не удалось позвонить" });
           return;
         }
-        id = res.callId;
-        setCall((c) => ({ ...c, callId: res.callId }));
       } catch {
         teardown();
         setCall({
@@ -352,7 +355,9 @@ export function CallProvider({ children }) {
       }),
 
       onCallEvent("call:ice", async ({ callId, candidate }) => {
-        if (callRef.current.callId && callRef.current.callId !== callId) return;
+        // Drop only candidates that clearly belong to a different call. A missing
+        // callId is accepted — we only ever run one call at a time.
+        if (callRef.current.callId && callId && callRef.current.callId !== callId) return;
         const pc = pcRef.current;
         if (!pc || !pc.remoteDescription) {
           pendingIce.current.push(candidate);
